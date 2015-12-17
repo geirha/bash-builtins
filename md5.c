@@ -39,14 +39,14 @@ md5_builtin(list)
 
     MD5Init(&context);
 
-	if (list == 0) {
+    if (list == 0) {
         while (n = read(0, buf, sizeof(buf))) {
             MD5Update(&context, buf, n);
         }
-	}
+    }
     else if (list->next) {
-		builtin_usage();
-		return(EX_USAGE);
+        builtin_usage();
+        return(EX_USAGE);
     }
     else {
         MD5Update(&context, list->word->word, strlen(list->word->word));
