@@ -12,18 +12,78 @@
 
 #define ROTATE(X, s) ((X) << (s) | (X) >> (32 - (s)))
 
-
 typedef struct MD5_CTX {
     uint32_t mdbuf[4];
-    size_t bitlength;
+    uint64_t bitlength;
     unsigned char block[64];
-    size_t block_size;
+    uint8_t block_length;
 } MD5_CTX;
+
+void MD5Init(MD5_CTX *context);
+void MD5Update(MD5_CTX *context, const void *data, unsigned int len);
+void MD5Pad(MD5_CTX *context);
+void MD5Final(unsigned char digest[16], MD5_CTX *context);
+
+void process_block(MD5_CTX *context);
+
+int
+md5_builtin(list)
+    WORD_LIST *list;
+{
+    unsigned char digest[16];
+    char hexdigest[33];
+    char buf[4096];
+    int n;
+    SHELL_VAR *shell_REPLY;
+    MD5_CTX context;
+
+    MD5Init(&context);
+
+	if (list == 0) {
+        while (n = read(0, buf, sizeof(buf))) {
+            MD5Update(&context, buf, n);
+        }
+	}
+    else if (list->next) {
+		builtin_usage();
+		return(EX_USAGE);
+    }
+    else {
+        MD5Update(&context, list->word->word, strlen(list->word->word));
+    }
+
+    MD5Final(digest, &context);
+    for (int i = 0; i < 16; i++)
+        sprintf(hexdigest+(i*2), "%02x", digest[i]);
+    hexdigest[32] = '\0';
+
+    shell_REPLY = bind_variable("REPLY", hexdigest, 0);
+
+    return (EXECUTION_SUCCESS);
+}
+
+char *md5_doc[] = {
+    "Calculate MD5 sum.",
+    "",
+    "Calculates the MD5 sum of the string argument, or stdin if no",
+    "argument is proveded. The result is assigned to the REPLY ",
+    "variable.",
+    (char *)NULL
+};
+
+struct builtin md5_struct = {
+    "md5",
+    md5_builtin,
+    BUILTIN_ENABLED,
+    md5_doc,
+    "md5 [string]",
+    0
+};
 
 void
 MD5Init(MD5_CTX *context) {
     memset(context->block, 0, 64);
-    context->block_size = 0;
+    context->block_length = 0;
     context->bitlength = 0;
 
     // 3.3 Step 3. Initialize MD Buffer
@@ -34,12 +94,58 @@ MD5Init(MD5_CTX *context) {
 
 }
 
-void debug_block(uint32_t*,size_t);
+void
+MD5Update(MD5_CTX *context, const void *data, unsigned int len) {
+    char *p = (char*)data;
+    int i = 64 - context->block_length;
+    while (i && len > i) {
+        memcpy(context->block + 64-i, p, i);
+        context->block_length += i;
+        context->bitlength += i * 8;
+        p += i;
+        if (context->block_length == 64)
+            process_block(context);
+        len -= i;
+        i = 64 - context->block_length;
+    }
+    memcpy(context->block + 64-i, p, len);
+    context->block_length += len;
+    context->bitlength += len * 8;
+    p += len;
+    if (context->block_length == 64)
+        process_block(context);
+}
+
+void
+MD5Pad(MD5_CTX *context) {
+    int i;
+    // 3.1 Step 1. Append Padding Bits
+    context->block[context->block_length++] = 0b10000000;
+    if (context->block_length > 56) {
+        i = 64 - context->block_length;
+        memset(context->block + context->block_length, 0, i);
+        context->block_length += i;
+        process_block(context);
+    }
+    i = 56 - context->block_length;
+    memset(context->block + context->block_length, 0, i);
+    context->block_length += i;
+
+    // 3.2 Step 2. Append Length
+    memcpy(context->block + context->block_length, &context->bitlength, 8);
+    context->block_length += 8;
+
+}
+
+void
+MD5Final(unsigned char digest[16], MD5_CTX *context) {
+    MD5Pad(context);
+    process_block(context);
+    //3.5 Step 5. Output
+    memcpy(digest, context->mdbuf, 16);
+}
 
 void process_block(MD5_CTX *context) {
-    if (context->block_size != 64) {
-        fprintf(stderr, "Wrong block_size: %lu\n", context->block_size);
-    }
     // At this point the resulting message (after padding with bits and with
     // b) has a length that is an exact multiple of 512 bits. Equivalently,
     // this message has a length that is an exact multiple of 16 (32-bit)
@@ -226,120 +332,6 @@ void process_block(MD5_CTX *context) {
     context->mdbuf[1] += B;
     context->mdbuf[2] += C;
     context->mdbuf[3] += D;
-    context->block_size = 0;
+    context->block_length = 0;
 }
-
-void
-debug_block(uint32_t *data, size_t len) {
-    for (int i = 0; i < len; i++) {
-        if (i%4==0) putchar('\n');
-        printf(" %08x", data[i]);
-    }
-    putchar('\n');
-}
-
-void
-MD5Update(MD5_CTX *context, const void *data, size_t len) {
-    char *p = (char*)data;
-    int i = 64 - context->block_size;
-    while (i && len > i) {
-        memcpy(context->block + 64-i, p, i);
-        context->block_size += i;
-        context->bitlength += i * 8;
-        p += i;
-        if (context->block_size == 64)
-            process_block(context);
-        len -= i;
-        i = 64 - context->block_size;
-    }
-    memcpy(context->block + 64-i, p, len);
-    context->block_size += len;
-    context->bitlength += len * 8;
-    p += len;
-    if (context->block_size == 64)
-        process_block(context);
-}
-
-void
-MD5Pad(MD5_CTX *context) {
-    int i;
-    // 3.1 Step 1. Append Padding Bits
-    context->block[context->block_size++] = 0b10000000;
-    if (context->block_size > 56) {
-        i = 64 - context->block_size;
-        memset(context->block + context->block_size, 0, i);
-        context->block_size += i;
-        process_block(context);
-    }
-    i = 56 - context->block_size;
-    memset(context->block + context->block_size, 0, i);
-    context->block_size += i;
-
-    // 3.2 Step 2. Append Length
-    memcpy(context->block + context->block_size, &context->bitlength, 8);
-    context->block_size += 8;
-
-}
-
-void
-MD5Final(unsigned char digest[16], MD5_CTX *context) {
-    MD5Pad(context);
-    process_block(context);
-    //3.5 Step 5. Output
-    memcpy(digest, context->mdbuf, 16);
-}
-
-int
-md5_builtin(list)
-    WORD_LIST *list;
-{
-    unsigned char digest[16];
-    char hexdigest[33];
-    char buf[4096];
-    int n;
-    SHELL_VAR *shell_REPLY;
-    MD5_CTX context;
-
-    MD5Init(&context);
-
-	if (list == 0) {
-        while (n = read(0, buf, sizeof(buf))) {
-            MD5Update(&context, buf, n);
-        }
-	}
-    else if (list->next) {
-		builtin_usage();
-		return(EX_USAGE);
-    }
-    else {
-        MD5Update(&context, list->word->word, strlen(list->word->word));
-    }
-
-    MD5Final(digest, &context);
-    for (int i = 0; i < 16; i++)
-        sprintf(hexdigest+(i*2), "%02x", digest[i]);
-    hexdigest[32] = '\0';
-
-    shell_REPLY = bind_variable("REPLY", hexdigest, 0);
-
-    return (EXECUTION_SUCCESS);
-}
-
-char *md5_doc[] = {
-    "Calculate MD5 sum.",
-    "",
-    "Calculates the MD5 sum of the string argument, or stdin if no",
-    "argument is proveded. The result is assigned to the REPLY ",
-    "variable.",
-    (char *)NULL
-};
-
-struct builtin md5_struct = {
-    "md5",
-    md5_builtin,
-    BUILTIN_ENABLED,
-    md5_doc,
-    "md5 [string]",
-    0
-};
 
