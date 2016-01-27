@@ -1,7 +1,12 @@
+#include <stdlib.h>
+#include <string.h>
+#include <inttypes.h>
+
 #include "bashtypes.h"
 #include "shell.h"
 #include "builtins.h"
 #include "common.h"
+#include "xmalloc.h"
 
 static int
 string_compare(const void *p1, const void *p2) {
