@@ -3,11 +3,10 @@
 #include "builtins.h"
 #include "common.h"
 
-void swap(ARRAY_ELEMENT *a, ARRAY_ELEMENT *b) {
-    char *tmp;
-    tmp = a->value;
-    a->value = b->value;
-    b->value = tmp;
+int string_compare(const void *p1, const void *p2) {
+    const ARRAY_ELEMENT *e1 = *(ARRAY_ELEMENT * const *) p1;
+    const ARRAY_ELEMENT *e2 = *(ARRAY_ELEMENT * const *) p2;
+    return strcoll(e1->value, e2->value);
 }
 
 int
@@ -18,6 +17,8 @@ asort_builtin(list)
     SHELL_VAR *var;
     ARRAY *a;
     ARRAY_ELEMENT *ae, *n;
+    ARRAY_ELEMENT **sa;
+    size_t i;
     int done = 0;
 
     if (list == 0) {
@@ -34,24 +35,28 @@ asort_builtin(list)
 
     a = array_cell(var);
 
-    // Make sure it is non-sparse
-    if (a->num_elements > 0 && a->num_elements <= a->max_index) {
-        a->max_index = -1;
-        for (ae = a->head->next; ae != a->head; ae = ae->next) {
-            ae->ind = ++a->max_index;
-        }
+    sa = xmalloc(a->num_elements * sizeof(ARRAY_ELEMENT*));
+
+    i = 0;
+    for (ae = a->head->next; ae != a->head; ae = ae->next) {
+        sa[i++] = ae;
     }
 
-    while (!done) {
-        done = 1;
-        ae = a->head->next;
-        for ( ; (n = ae->next) != a->head; ae = ae->next) {
-            if (strcoll(ae->value, n->value) > 0) {
-                swap(ae, n);
-                done = 0;
-            }
-        }
+    qsort(sa, a->num_elements, sizeof(ARRAY_ELEMENT*), string_compare);
+
+    sa[0]->prev = sa[a->num_elements-1]->next = a->head;
+    a->head->next = sa[0];
+    a->head->prev = sa[a->num_elements-1];
+    a->max_index = a->num_elements-1;
+    for (i = 0; i < a->num_elements; i++) {
+        sa[i]->ind = i;
+        if (i > 0)
+            sa[i]->prev = sa[i-1];
+        if (i < a->num_elements - 1)
+            sa[i]->next = sa[i+1];
     }
+
+    xfree(sa);
 
     return (EXECUTION_SUCCESS);
 }
