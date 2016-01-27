@@ -3,10 +3,23 @@
 #include "builtins.h"
 #include "common.h"
 
-int string_compare(const void *p1, const void *p2) {
+static int
+string_compare(const void *p1, const void *p2) {
     const ARRAY_ELEMENT *e1 = *(ARRAY_ELEMENT * const *) p1;
     const ARRAY_ELEMENT *e2 = *(ARRAY_ELEMENT * const *) p2;
     return strcoll(e1->value, e2->value);
+}
+static int
+number_compare(const void *p1, const void *p2) {
+    const ARRAY_ELEMENT *e1 = *(ARRAY_ELEMENT * const *) p1;
+    const ARRAY_ELEMENT *e2 = *(ARRAY_ELEMENT * const *) p2;
+    double d1 = strtod(e1->value, NULL);
+    double d2 = strtod(e2->value, NULL);
+    if (d1 < d2)
+        return -1;
+    else if (d1 > d2)
+        return 1;
+    return 0;
 }
 
 int
@@ -19,11 +32,25 @@ asort_builtin(list)
     ARRAY_ELEMENT **sa;
     size_t i;
     int done = 0;
+    int numeric_flag = 0;
     char *word;
 
     if (list == 0) {
         builtin_usage();
         return(EX_USAGE);
+    }
+
+    word = list->word->word;
+    while (word[0] == '-' && word[1] != '\0' && word[2] == '\0') {
+        if (word[1] == 'n') {
+            numeric_flag = 1;
+        }
+        else if (word[1] != '-') {
+            builtin_usage();
+            return (EX_USAGE);
+        }
+        list = list->next;
+        word = list->word->word;
     }
 
     while (list) {
@@ -32,9 +59,8 @@ asort_builtin(list)
         var = find_variable(word);
 
         if (var == 0 || array_p(var) == 0) {
-            // FIXME: find the builtin equivalent for report_error
-            report_error("%s: Not an array", word);
-            return (EXECUTION_FAILURE);
+            builtin_error("%s: Not an array", word);
+            continue;
         }
 
         a = array_cell(var);
@@ -48,8 +74,10 @@ asort_builtin(list)
         for (ae = a->head->next; ae != a->head; ae = ae->next) {
             sa[i++] = ae;
         }
-
-        qsort(sa, a->num_elements, sizeof(ARRAY_ELEMENT*), string_compare);
+        if (numeric_flag)
+            qsort(sa, a->num_elements, sizeof(ARRAY_ELEMENT*), number_compare);
+        else
+            qsort(sa, a->num_elements, sizeof(ARRAY_ELEMENT*), string_compare);
 
         sa[0]->prev = sa[a->num_elements-1]->next = a->head;
         a->head->next = sa[0];
@@ -69,6 +97,9 @@ asort_builtin(list)
 
 char *asort_doc[] = {
     "Sort arrays in-place.",
+    "",
+    "Options:",
+    "  -n  compare according to string numerical value",
     (char *)NULL
 };
 
@@ -77,7 +108,7 @@ struct builtin asort_struct = {
     asort_builtin,
     BUILTIN_ENABLED,
     asort_doc,
-    "asort array...",
+    "asort [-n] array...",
     0
 };
 
