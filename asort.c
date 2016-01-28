@@ -9,28 +9,31 @@
 #include "xmalloc.h"
 #include "bashgetopt.h"
 
+typedef struct sort_element {
+    ARRAY_ELEMENT *v;
+    double num; // used for numeric sort
+} sort_element;
+
 static int reverse_flag;
+static int numeric_flag;
 
 static int
-string_compare(const void *p1, const void *p2) {
-    const ARRAY_ELEMENT *e1 = *(ARRAY_ELEMENT * const *) p1;
-    const ARRAY_ELEMENT *e2 = *(ARRAY_ELEMENT * const *) p2;
-    if (reverse_flag)
-        return -1 * strcoll(e1->value, e2->value);
-    return strcoll(e1->value, e2->value);
-}
-static int
-number_compare(const void *p1, const void *p2) {
-    const ARRAY_ELEMENT *e1 = *(ARRAY_ELEMENT * const *) p1;
-    const ARRAY_ELEMENT *e2 = *(ARRAY_ELEMENT * const *) p2;
-    double d1 = strtod(e1->value, NULL);
-    double d2 = strtod(e2->value, NULL);
-    int r = reverse_flag ? -1 : 1;
-    if (d1 < d2)
-        return r * -1;
-    else if (d1 > d2)
-        return r * 1;
-    return 0;
+compare(const void *p1, const void *p2) {
+    const sort_element e1 = *(sort_element *) p1;
+    const sort_element e2 = *(sort_element *) p2;
+
+    if (numeric_flag) {
+        if (reverse_flag)
+            return (e2.num > e1.num) ? 1 : (e2.num < e1.num) ? -1 : 0;
+        else
+            return (e1.num > e2.num) ? 1 : (e1.num < e2.num) ? -1 : 0;
+    }
+    else {
+        if (reverse_flag)
+            return strcoll(e2.v->value, e1.v->value);
+        else
+            return strcoll(e1.v->value, e2.v->value);
+    }
 }
 
 int
@@ -40,13 +43,13 @@ asort_builtin(list)
     SHELL_VAR *var;
     ARRAY *a;
     ARRAY_ELEMENT *ae, *n;
-    ARRAY_ELEMENT **sa;
+    sort_element *sa;
     size_t i;
     int done = 0;
-    int numeric_flag = 0;
     char *word;
     int opt;
 
+    numeric_flag = 0;
     reverse_flag = 0;
 
     reset_internal_getopt();
@@ -66,6 +69,8 @@ asort_builtin(list)
         builtin_usage();
         return(EX_USAGE);
     }
+
+    sa = 0;
 
     while (list) {
         word = list->word->word;
@@ -87,30 +92,30 @@ asort_builtin(list)
         if (a->num_elements == 0)
             continue;
 
-        sa = xmalloc(a->num_elements * sizeof(ARRAY_ELEMENT*));
+        sa = xrealloc(sa, a->num_elements * sizeof(sort_element));
 
         i = 0;
         for (ae = a->head->next; ae != a->head; ae = ae->next) {
-            sa[i++] = ae;
+            sa[i].v = ae;
+            if (numeric_flag)
+                sa[i].num = strtod(ae->value, NULL);
+            i++;
         }
-        if (numeric_flag)
-            qsort(sa, a->num_elements, sizeof(ARRAY_ELEMENT*), number_compare);
-        else
-            qsort(sa, a->num_elements, sizeof(ARRAY_ELEMENT*), string_compare);
+        qsort(sa, a->num_elements, sizeof(sort_element), compare);
 
-        sa[0]->prev = sa[a->num_elements-1]->next = a->head;
-        a->head->next = sa[0];
-        a->head->prev = sa[a->num_elements-1];
-        a->max_index = a->num_elements-1;
+        sa[0].v->prev = sa[a->num_elements-1].v->next = a->head;
+        a->head->next = sa[0].v;
+        a->head->prev = sa[a->num_elements-1].v;
+        a->max_index = a->num_elements - 1;
         for (i = 0; i < a->num_elements; i++) {
-            sa[i]->ind = i;
+            sa[i].v->ind = i;
             if (i > 0)
-                sa[i]->prev = sa[i-1];
+                sa[i].v->prev = sa[i-1].v;
             if (i < a->num_elements - 1)
-                sa[i]->next = sa[i+1];
+                sa[i].v->next = sa[i+1].v;
         }
-        free(sa);
     }
+    free(sa);
     return (EXECUTION_SUCCESS);
 }
 
