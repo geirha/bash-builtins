@@ -67,6 +67,11 @@ asort_builtin(list)
             builtin_error("%s: Not an array", word);
             continue;
         }
+        if (readonly_p(var) || noassign_p(var)) {
+            if (readonly_p(var))
+                err_readonly(word);
+            continue;
+        }
 
         a = array_cell(var);
 
