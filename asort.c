@@ -7,11 +7,16 @@
 #include "builtins.h"
 #include "common.h"
 #include "xmalloc.h"
+#include "bashgetopt.h"
+
+static int reverse_flag;
 
 static int
 string_compare(const void *p1, const void *p2) {
     const ARRAY_ELEMENT *e1 = *(ARRAY_ELEMENT * const *) p1;
     const ARRAY_ELEMENT *e2 = *(ARRAY_ELEMENT * const *) p2;
+    if (reverse_flag)
+        return -1 * strcoll(e1->value, e2->value);
     return strcoll(e1->value, e2->value);
 }
 static int
@@ -20,10 +25,11 @@ number_compare(const void *p1, const void *p2) {
     const ARRAY_ELEMENT *e2 = *(ARRAY_ELEMENT * const *) p2;
     double d1 = strtod(e1->value, NULL);
     double d2 = strtod(e2->value, NULL);
+    int r = reverse_flag ? -1 : 1;
     if (d1 < d2)
-        return -1;
+        return r * -1;
     else if (d1 > d2)
-        return 1;
+        return r * 1;
     return 0;
 }
 
@@ -39,24 +45,27 @@ asort_builtin(list)
     int done = 0;
     int numeric_flag = 0;
     char *word;
+    int opt;
 
     if (list == 0) {
         builtin_usage();
         return(EX_USAGE);
     }
 
-    word = list->word->word;
-    while (word[0] == '-' && word[1] != '\0' && word[2] == '\0') {
-        if (word[1] == 'n') {
-            numeric_flag = 1;
+    reverse_flag = 0;
+
+    reset_internal_getopt();
+    while ((opt = internal_getopt(list, "nr")) != -1) {
+        switch (opt) {
+            case 'n': numeric_flag = 1; break;
+            case 'r': reverse_flag = 1; break;
+            CASE_HELPOPT;
+            default:
+                builtin_usage();
+                return (EX_USAGE);
         }
-        else if (word[1] != '-') {
-            builtin_usage();
-            return (EX_USAGE);
-        }
-        list = list->next;
-        word = list->word->word;
     }
+    list = loptend;
 
     while (list) {
         word = list->word->word;
@@ -110,6 +119,7 @@ char *asort_doc[] = {
     "",
     "Options:",
     "  -n  compare according to string numerical value",
+    "  -r  reverse the result of comparisons",
     (char *)NULL
 };
 
