@@ -47,11 +47,6 @@ asort_builtin(list)
     char *word;
     int opt;
 
-    if (list == 0) {
-        builtin_usage();
-        return(EX_USAGE);
-    }
-
     reverse_flag = 0;
 
     reset_internal_getopt();
@@ -66,6 +61,11 @@ asort_builtin(list)
         }
     }
     list = loptend;
+
+    if (list == 0) {
+        builtin_usage();
+        return(EX_USAGE);
+    }
 
     while (list) {
         word = list->word->word;
