@@ -128,7 +128,7 @@ struct builtin asort_struct = {
     asort_builtin,
     BUILTIN_ENABLED,
     asort_doc,
-    "asort [-n] array...",
+    "asort [-nr] array...",
     0
 };
 
