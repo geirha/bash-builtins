@@ -66,7 +66,7 @@ char *md5_doc[] = {
     "Calculate MD5 sum.",
     "",
     "Calculates the MD5 sum of the string argument, or stdin if no",
-    "argument is proveded. The result is assigned to the REPLY ",
+    "argument is provided. The result is assigned to the REPLY ",
     "variable.",
     (char *)NULL
 };
