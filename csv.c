@@ -15,6 +15,8 @@ typedef struct CSV_context {
     int rs;     // record separator (default: -1, meaning "\r\n" or '\n')
     int fs;     // field separator (default: ',')
     int q;      // quote character (default: '"')
+    int unsigned *field_list;
+    size_t field_list_size;
 } CSV_context;
 
 /* Copied from builtins/read.def */
@@ -36,6 +38,66 @@ bind_read_variable (name, value)
                  : ((readonly_p (v) || noassign_p (v)) ? (SHELL_VAR *)NULL : v));
 }
 
+int
+skip_field(n, ctx)
+int n;
+CSV_context *ctx;
+{
+    size_t i;
+    if ( ctx->field_list_size == 0 )
+        return 0;
+    for (i = 0; i < ctx->field_list_size; ++i) {
+        if ( ctx->field_list[i] > n)
+            return 1;
+        if ( ctx->field_list[i] == n)
+            return 0;
+    }
+    return 1;
+}
+
+int
+parse_list(s, ctx)
+char *s;
+CSV_context *ctx;
+{
+    char *c, *d, *bc, *bd;
+    int unsigned from, to, i;
+    intmax_t intval;
+    int n, ret;
+    int unsigned *array;
+    size_t size;
+    if ( !isdigit(*s) )
+        return 0;
+    
+    array = xmalloc(sizeof(int) * 100);   // TODO: realloc as necessary
+    size = 0;
+
+    for (c = strtok_r(s, ",", &bc); c; c = strtok_r(NULL, ",", &bc)) {
+        d = strtok_r(c, "-", &bd);
+        ret = legal_number(d, &intval);
+        if (ret == 0 || intval < 0 || intval != (int) intval)
+            return 0;
+        from = to = intval;
+
+        d = strtok_r(NULL, "-", &bd);
+        if (d) {
+            ret = legal_number(d, &intval);
+            if (ret == 0 || intval < from || intval != (int) intval)
+                return 0;
+            to = intval;
+            if ( strtok_r(NULL, "-", &bd) )
+                return 0;
+        }
+
+        for (i = from; i <= to; ++i)
+            array[size++] = i;
+    }
+    ctx->field_list = array;
+    ctx->field_list_size = size;
+    return 1;
+}
+
+
 /* 
  *  field is malloced, and filled with the next field separated either by the
  *  field separator or record separator. Caller should free it.
@@ -46,8 +108,8 @@ bind_read_variable (name, value)
 
 int
 read_csv_field(field, ctx)
-    char **field;
-    CSV_context *ctx;
+char **field;
+CSV_context *ctx;
 {
     char c, *p;
     char quote = 0;
@@ -100,7 +162,7 @@ read_csv_field(field, ctx)
 
 int
 skip_csv_row(ctx)
-    CSV_context * ctx;
+CSV_context * ctx;
 {
 
     int ret, quote = 0;
@@ -136,15 +198,18 @@ CSV_context *ctx;
 
     array_flush(a);     // a=()
     while ( (sep = read_csv_field(&buf, ctx)) >= 0 ) {
-        array_insert(a, ctx->col, buf);     // a[col]=$buf
+        if ( !skip_field(ctx->col, ctx) )
+            //TODO: array_insert may not be enough. Needs more work
+            array_insert(a, ctx->col, buf);     // a[col]=$buf
         xfree(buf);
         if (sep == ctx->rs || ctx->rs == -1 && sep == '\n')
             return EXECUTION_SUCCESS;
     }
-    if (buf[0]) {
+    if (buf[0] && !skip_field(ctx->col, ctx) ) {
         array_insert(a, ctx->col, buf);     // a[col]=$buf
         return EXECUTION_SUCCESS;
     }
+    xfree(buf);
     return EXECUTION_FAILURE;
 }
 
@@ -164,17 +229,20 @@ CSV_context *ctx;
         return read_into_array(header, ctx);
     
     while ( (sep = read_csv_field(&buf, ctx)) >= 0 ) {
-        key = NULL;
-        if (header)
-            key = array_reference(header, ctx->col);
-        if (key == NULL)
-            key = fmtulong(ctx->col, 10, ibuf, sizeof(ibuf), 0);
-        assoc_insert(h, savestring(key), buf);  // h[${header[col]-$col}]=$buf  
+        if ( !skip_field(ctx->col, ctx) ) {
+            key = NULL;
+            if (header)
+                key = array_reference(header, ctx->col);
+            if (key == NULL)
+                key = fmtulong(ctx->col, 10, ibuf, sizeof(ibuf), 0);
+            //TODO: assoc_insert is not enough. Needs more work
+            assoc_insert(h, savestring(key), buf);  // h[${header[col]-$col}]=$buf  
+        }
         xfree(buf);
         if (sep == ctx->rs || ctx->rs == -1 && sep == '\n')
             return EXECUTION_SUCCESS;
     }
-    if (buf[0]) {
+    if (buf[0] && !skip_field(ctx->col, ctx)) {
         key = NULL;
         if (header)
             key = array_reference(header, ctx->col);
@@ -183,6 +251,7 @@ CSV_context *ctx;
         assoc_insert(h, savestring(key), buf);  // h[${header[col]-$col}]=$buf  
         return EXECUTION_SUCCESS;
     }
+    xfree(buf);
     return EXECUTION_FAILURE;
 }
 
@@ -204,12 +273,14 @@ WORD_LIST *list;
         -1,     // col
         -1,     // rs
         ',',    // fs
-        '"'     // q
+        '"',    // q
+        0,      // field_list
+        0       // field_list_size
     };
 
 
     reset_internal_getopt();
-    while ( (opt = internal_getopt(list, "aAd:f:q:u:")) != -1 ) {
+    while ( (opt = internal_getopt(list, "aAd:f:F:q:u:")) != -1 ) {
         switch (opt) {
             case 'a':
                 if (use_array == 0 || use_array == 'a')
@@ -228,7 +299,13 @@ WORD_LIST *list;
                 }
                 break;
             case 'd': ctx.rs = list_optarg[0]; break;
-            case 'f': ctx.fs = list_optarg[0]; break;
+            case 'f': 
+                if (parse_list(list_optarg, &ctx) == 0) {
+                    builtin_error("-f: illegal list value");
+                    return EXECUTION_FAILURE;
+                }
+                break;
+            case 'F': ctx.fs = list_optarg[0]; break;
             case 'q': ctx.q = list_optarg[0]; break;
             case 'u': 
                 ret = legal_number(list_optarg, &intval);
@@ -286,20 +363,30 @@ WORD_LIST *list;
     eor = 0;
     while (list) {
         word = list->word->word;
+        printf("word: %s, eor: %d\n", word, eor);
         if (legal_identifier (word) == 0 && valid_array_reference (word, 0) == 0) {
             sh_invalidid(word);
             return EXECUTION_FAILURE;
         }
         if ( eor )
             bind_read_variable(word, "");
-        else if ( (sep = read_csv_field(&buf, &ctx)) >= 0 ) {
-            bind_read_variable(word, buf);
+        else {
+            while ( (sep = read_csv_field(&buf, &ctx)) >= 0 && skip_field(ctx.col, &ctx) ) {
+                printf("SKIP. buf: %s, col: %d, sep: %02x\n", buf, ctx.col, sep);
+                if ( sep == ctx.rs || ctx.rs == -1 && sep == '\n' ) {
+                    eor = 1;
+                    break;
+                }
+                xfree(buf);
+            }
+            printf("buf: %s, col: %d, sep: %02x\n", buf, ctx.col, sep);
+            
+            if ( skip_field(ctx.col, &ctx) )
+                bind_read_variable(word, "");
+            else
+                bind_read_variable(word, buf);
             xfree(buf);
         }
-        else
-            bind_read_variable(word, "");
-        if ( sep == ctx.rs || ctx.rs == -1 && sep == '\n' )
-            eor = 1;
         
         list = list->next;
     }
@@ -327,9 +414,12 @@ char *csv_doc[] = {
     "           may be provided, and will be used as keys. If second NAME",
     "           is an empty array, the fields are read into that array",
     "           instead.", 
-    "  -f sep   split fields on SEP instead of comma",
     "  -d delim read until the first character of DELIM is read,",
     "           rather than newline or carriage return and newline.",
+    "  -f list  read only the listed fields. LIST is a comma separated list",
+    "           of numbers and ranges. e.g. -f0-2,5,7-8 will pick fields",
+    "           0, 1, 2, 5, 7, and 8.",
+    "  -F sep   split fields on SEP instead of comma",
     "  -q quote use QUOTE as quote character, rather than `\"'.",
     "  -u fd    read from file descriptor FD instead of the standard input.",
     "",
@@ -344,7 +434,7 @@ struct builtin csv_struct = {
     csv_builtin,
     BUILTIN_ENABLED,
     csv_doc,
-    "csv [-a | -A] [-f sep] [-d delim] [-q quote] [-u fd] name ...",
+    "csv [-a | -A] [-d delim] [-f list] [-F sep] [-q quote] [-u fd] name ...",
     0
 };
 
