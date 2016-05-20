@@ -15,8 +15,8 @@ typedef struct CSV_context {
     int rs;     // record separator (default: -1, meaning "\r\n" or '\n')
     int fs;     // field separator (default: ',')
     int q;      // quote character (default: '"')
-    int unsigned *field_list;
-    size_t field_list_size;
+    ARRAY *cut; // list of fields to include
+    int to_inf; // 1 if -f ended with N-, 0 otherwise
 } CSV_context;
 
 /* Copied from builtins/read.def */
@@ -40,64 +40,72 @@ bind_read_variable (name, value)
 
 int
 skip_field(n, ctx)
-int n;
+arrayind_t n;
 CSV_context *ctx;
 {
-    size_t i;
-    if ( ctx->field_list_size == 0 )
+    if ( n > array_max_index(ctx->cut) && ctx->to_inf )
         return 0;
-    for (i = 0; i < ctx->field_list_size; ++i) {
-        if ( ctx->field_list[i] > n)
-            return 1;
-        if ( ctx->field_list[i] == n)
-            return 0;
-    }
-    return 1;
+    return array_reference(ctx->cut, n) ? 0 : 1;
 }
 
-int
-parse_list(s, ctx)
-char *s;
-CSV_context *ctx;
-{
-    char *c, *d, *bc, *bd;
-    int unsigned from, to, i;
-    intmax_t intval;
-    int n, ret;
-    int unsigned *array;
-    size_t size;
-    if ( !isdigit(*s) )
-        return 0;
+int parse_list(char *s, CSV_context *ctx) {
+    ARRAY *a;
+    char *range;
+    arrayind_t i, from, to;
 
-    array = xmalloc(sizeof(int) * 100);   // TODO: realloc as necessary
-    size = 0;
-
-    // TODO: handle starting -N and ending N-
-    for (c = strtok_r(s, ",", &bc); c; c = strtok_r(NULL, ",", &bc)) {
-        d = strtok_r(c, "-", &bd);
-        ret = legal_number(d, &intval);
-        if (ret == 0 || intval < 0 || intval != (int) intval)
+    a = array_create();
+    
+    for (range = strtok(s, ","); range; range = strtok(NULL, ",")) {
+        from = 0;
+        to = -1;
+        if (*range == '\0')
             return 0;
-        from = to = intval;
-
-        d = strtok_r(NULL, "-", &bd);
-        if (d) {
-            ret = legal_number(d, &intval);
-            if (ret == 0 || intval < from || intval != (int) intval)
-                return 0;
-            to = intval;
-            if ( strtok_r(NULL, "-", &bd) )
-                return 0;
+        else if (*range == '-') { // -M
+            to = 0;
+            while ( *++range ) {
+                if ( ! isdigit(*range) )
+                    return 0;
+                to = to * 10 + *range - '0';
+            }
         }
-
-        for (i = from; i <= to; ++i)
-            array[size++] = i;
+        else if ( ! isdigit(*range) )
+            return 0;
+        else {                  // N, N-M or N-
+            from = *range - '0';
+            while ( *++range && *range != '-') {
+                if ( ! isdigit(*range) )
+                    return 0;
+                from = from * 10 + *range - '0';
+            }
+            if (*range == '\0') {
+                to = from;
+            }
+            else if ( *(range+1) == 0 )
+                to = -1;
+            else {
+                to = 0;
+                while ( *++range ) {
+                    if ( ! isdigit(*range) )
+                        return 0;
+                    to = to * 10 + *range - '0';
+                }
+            }
+        }
+        if ( to == -1 ) {
+            array_insert(a, from, "");
+            ctx->to_inf = 1;
+        }
+        else if (to < from)
+            return 0;
+        else {
+            for (i = from; i <= to; ++i) {
+                array_insert(a, i, "");
+            }
+        }
     }
-    ctx->field_list = array;
-    ctx->field_list_size = size;
+    ctx->cut = a;
     return 1;
 }
-
 
 /*
  *  field is malloced, and filled with the next field separated either by the
@@ -281,8 +289,8 @@ WORD_LIST *list;
         -1,     // rs
         ',',    // fs
         '"',    // q
-        0,      // field_list
-        0       // field_list_size
+        0,      // cut array
+        0       // to_inf
     };
 
 
@@ -379,7 +387,6 @@ WORD_LIST *list;
     eor = 0;
     while (list) {
         word = list->word->word;
-        printf("word: %s, eor: %d\n", word, eor);
         if (legal_identifier (word) == 0 && valid_array_reference (word, 0) == 0) {
             sh_invalidid(word);
             return EXECUTION_FAILURE;
@@ -388,14 +395,12 @@ WORD_LIST *list;
             bind_read_variable(word, "");
         else {
             while ( (sep = read_csv_field(&buf, &ctx)) >= 0 && skip_field(ctx.col, &ctx) ) {
-                printf("SKIP. buf: %s, col: %d, sep: %02x\n", buf, ctx.col, sep);
                 if ( sep == ctx.rs || ctx.rs == -1 && sep == '\n' ) {
                     eor = 1;
                     break;
                 }
                 xfree(buf);
             }
-            printf("buf: %s, col: %d, sep: %02x\n", buf, ctx.col, sep);
 
             if ( skip_field(ctx.col, &ctx) )
                 bind_read_variable(word, "");
