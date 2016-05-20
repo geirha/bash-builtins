@@ -39,11 +39,11 @@ bind_read_variable (name, value)
 }
 
 int
-skip_field(arrayind_t n, CSV_context *ctx)
+skip_field(CSV_context *ctx)
 {
-    if ( n > array_max_index(ctx->cut) && ctx->to_inf )
+    if ( ctx->col > array_max_index(ctx->cut) && ctx->to_inf )
         return 0;
-    return array_reference(ctx->cut, n) ? 0 : 1;
+    return array_reference(ctx->cut, ctx->col) ? 0 : 1;
 }
 
 int
@@ -195,77 +195,68 @@ skip_csv_row(CSV_context *ctx)
 }
 
 int
-read_into_array(ARRAY *a, CSV_context *ctx)
-{
-    int sep;
-    char *buf;
+read_into_array(SHELL_VAR *array, SHELL_VAR *header, CSV_context *ctx) {
 
-    array_flush(a);     // a=()
-    while ( (sep = read_csv_field(&buf, ctx)) >= 0 ) {
-        if ( !skip_field(ctx->col, ctx) )
-            array_insert(a, ctx->col, buf);     // a[col]=$buf
-        xfree(buf);
-        if (sep == ctx->rs || ctx->rs == -1 && sep == '\n')
+    int ret;
+    char *key, *value, ibuf[INT_STRLEN_BOUND (intmax_t) + 1];
+    ARRAY *row_a = NULL, *header_a = NULL;
+    HASH_TABLE *row_h = NULL;
+    
+    
+    if ( header ) {
+        header_a = array_cell(header);
+        if ( array_empty(header_a) )
+            read_into_array(header, NULL, ctx);
+    }
+
+    if ( assoc_p(array) )
+        row_h = assoc_cell(array);
+    else
+        row_a = array_cell(array);
+    
+    ctx->col = -1;
+    while ( (ret = read_csv_field(&value, ctx)) >= 0 ) {
+        if ( !skip_field(ctx) ) {
+            if (row_a)
+                array_insert(row_a, ctx->col, value);
+            else if (row_h) {
+                key = NULL;
+                if (header_a)
+                    key = array_reference(header_a, ctx->col);
+                if (key == NULL)
+                    key = fmtulong(ctx->col, 10, ibuf, sizeof(ibuf), 0);
+                assoc_insert(row_h, savestring(key), value);
+            }
+        }
+        xfree(value);
+        if ( ret == ctx->rs || ctx->rs == -1 && ret == '\n' )
             return EXECUTION_SUCCESS;
     }
-    if (buf[0] && !skip_field(ctx->col, ctx) ) {
-        array_insert(a, ctx->col, buf);     // a[col]=$buf
-        return EXECUTION_SUCCESS;
-    }
-    xfree(buf);
-    return EXECUTION_FAILURE;
-}
-
-int
-read_into_assoc(char *name, SHELL_VAR *assoc, ARRAY *header, CSV_context *ctx)
-{
-    HASH_TABLE *h;
-    int ret;
-    char *key, *buf, ibuf[INT_STRLEN_BOUND (intmax_t) + 1];
-
-    h = assoc_cell(assoc);
-
-    // h=()
-    assoc_flush(h);
-    VUNSETATTR(assoc, att_invisible);
-
-    // if header is an empty array, read a row into header first
-    if ( header && array_empty(header) && (ret = read_into_array(header, ctx)) != 0 )
-        return ret;
-
-    ctx->col = -1;
-
-    while ( (ret = read_csv_field(&buf, ctx)) >= 0 ) {
-        if ( !skip_field(ctx->col, ctx) ) {
+    if ( value[0] && !skip_field(ctx) ) {
+        if (row_a)
+            array_insert(row_a, ctx->col, value);
+        else if (row_h) {
             key = NULL;
-            if (header)
-                key = array_reference(header, ctx->col);
+            if (header_a)
+                key = array_reference(header_a, ctx->col);
             if (key == NULL)
                 key = fmtulong(ctx->col, 10, ibuf, sizeof(ibuf), 0);
-            assoc_insert(h, savestring(key), buf);  // h[${header[col]-$col}]=$buf
+            assoc_insert(row_h, savestring(key), value);
         }
-        xfree(buf);
-        if (ret == ctx->rs || ctx->rs == -1 && ret == '\n')
-            return EXECUTION_SUCCESS;
-    }
-    if (buf[0] && !skip_field(ctx->col, ctx)) {
-        key = NULL;
-        if (header)
-            key = array_reference(header, ctx->col);
-        if (key == NULL)
-            key = fmtulong(ctx->col, 10, ibuf, sizeof(ibuf), 0);
-        assoc_insert(h, savestring(key), buf);  // h[${header[col]-$col}]=$buf
+        xfree(value);
         return EXECUTION_SUCCESS;
     }
-    xfree(buf);
+    xfree(value);
     return EXECUTION_FAILURE;
-}
 
+}
 
 int
 csv_builtin(WORD_LIST *list)
 {
     SHELL_VAR *var;
+    SHELL_VAR *array;
+    SHELL_VAR *header;
     ARRAY *a = NULL;
     char *word;
     char *buf = NULL;
@@ -285,24 +276,9 @@ csv_builtin(WORD_LIST *list)
 
 
     reset_internal_getopt();
-    while ( (opt = internal_getopt(list, "aAd:f:F:q:u:")) != -1 ) {
+    while ( (opt = internal_getopt(list, "ad:f:F:q:u:")) != -1 ) {
         switch (opt) {
-            case 'a':
-                if (use_array == 0 || use_array == 'a')
-                    use_array = 'a';
-                else {
-                    builtin_error("-a conflicts with -A");
-                    return EX_USAGE;
-                }
-                break;
-            case 'A':
-                if (use_array == 0 || use_array == 'A')
-                    use_array = 'A';
-                else {
-                    builtin_error("-A conflicts with -a");
-                    return EX_USAGE;
-                }
-                break;
+            case 'a': use_array=1; break;
             case 'd': ctx.rs = list_optarg[0]; break;
             case 'f':
                 if (parse_list(list_optarg, &ctx) == 0) {
@@ -333,58 +309,60 @@ csv_builtin(WORD_LIST *list)
         return EX_USAGE;
     }
 
-    if (use_array == 'a') {
-        if (legal_identifier(list->word->word) == 0) {
+    if ( use_array ) {
+        array = header = NULL;
+        if ( legal_identifier(list->word->word) == 0 ) {
             sh_invalidid(list->word->word);
             return EXECUTION_FAILURE;
         }
-        if (list->next) {
-            builtin_usage();
-            return EX_USAGE;
+        array = find_variable(list->word->word);
+        if ( array && assoc_p(array) ) {
+            array = find_or_make_array_variable(list->word->word, 1|2);
+            if ( array == 0 )
+                return EXECUTION_FAILURE;
+            assoc_flush(assoc_cell(array));
         }
-
-        if ( (var = find_or_make_array_variable(list->word->word, 1)) == 0 )
-            return EXECUTION_FAILURE;
-
-        return read_into_array(array_cell(var), &ctx);
-    }
-    else if (use_array == 'A') {
-        if (legal_identifier(list->word->word) == 0) {
-            sh_invalidid(list->word->word);
-            return EXECUTION_FAILURE;
+        else {
+            array = find_or_make_array_variable(list->word->word, 1);
+            if ( array == 0 )
+                return EXECUTION_FAILURE;
+            array_flush(array_cell(array));
         }
-        if (list->next) {
-            if (legal_identifier(list->next->word->word) == 0) {
+        VUNSETATTR(array, att_invisible);
+        
+        list = list->next;
+        if ( list ) {    
+            if ( legal_identifier(list->word->word) == 0 ) {
                 sh_invalidid(list->word->word);
                 return EXECUTION_FAILURE;
             }
-            if ( (var = find_or_make_array_variable(list->next->word->word, 1)) == 0 )
+            header = find_or_make_array_variable(list->word->word, 1);
+            if ( header == 0 )
                 return EXECUTION_FAILURE;
-
-            a = array_cell(var);
+            VUNSETATTR(header, att_invisible);
         }
-        if ( (var = find_or_make_array_variable(list->word->word, 1|2)) == 0 )
+        ret = read_into_array(array, header, &ctx);
+        zsyncfd(ctx.fd);
+        return ret;
+    }
+
+    // Let's go through the list before-hand and check if any of the variables are invalid
+    while (list) {
+        if (legal_identifier (list->word->word) == 0 && valid_array_reference (list->word->word, 0) == 0) {
+            sh_invalidid(list->word->word);
             return EXECUTION_FAILURE;
-        return read_into_assoc(list->word->word, var, a, &ctx);
+        }
+        list = list->next;
     }
-
-    if (legal_identifier (list->word->word) == 0 && valid_array_reference (list->word->word, 0) == 0) {
-        sh_invalidid(list->word->word);
-        return EXECUTION_FAILURE;
-    }
-
+    list = loptend;
 
     eor = 0;
     while (list) {
         word = list->word->word;
-        if (legal_identifier (word) == 0 && valid_array_reference (word, 0) == 0) {
-            sh_invalidid(word);
-            return EXECUTION_FAILURE;
-        }
         if ( eor )
             bind_read_variable(word, "");
         else {
-            while ( (sep = read_csv_field(&buf, &ctx)) >= 0 && skip_field(ctx.col, &ctx) ) {
+            while ( (sep = read_csv_field(&buf, &ctx)) >= 0 && skip_field(&ctx) ) {
                 if ( sep == ctx.rs || ctx.rs == -1 && sep == '\n' ) {
                     eor = 1;
                     break;
@@ -392,7 +370,7 @@ csv_builtin(WORD_LIST *list)
                 xfree(buf);
             }
 
-            if ( skip_field(ctx.col, &ctx) )
+            if ( skip_field(&ctx) )
                 bind_read_variable(word, "");
             else
                 bind_read_variable(word, buf);
@@ -403,7 +381,7 @@ csv_builtin(WORD_LIST *list)
     }
     if ( !(sep == ctx.rs || ctx.rs == -1 && sep == '\n') )
         skip_csv_row(&ctx);
-    zsyncfd(0);
+    zsyncfd(ctx.fd);
     return EXECUTION_SUCCESS;
 }
 
