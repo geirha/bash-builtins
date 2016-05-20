@@ -39,16 +39,16 @@ bind_read_variable (name, value)
 }
 
 int
-skip_field(n, ctx)
-arrayind_t n;
-CSV_context *ctx;
+skip_field(arrayind_t n, CSV_context *ctx)
 {
     if ( n > array_max_index(ctx->cut) && ctx->to_inf )
         return 0;
     return array_reference(ctx->cut, n) ? 0 : 1;
 }
 
-int parse_list(char *s, CSV_context *ctx) {
+int
+parse_list(char *s, CSV_context *ctx)
+{
     ARRAY *a;
     char *range;
     arrayind_t i, from, to;
@@ -116,9 +116,7 @@ int parse_list(char *s, CSV_context *ctx) {
  */
 
 int
-read_csv_field(field, ctx)
-char **field;
-CSV_context *ctx;
+read_csv_field(char **field, CSV_context *ctx)
 {
     char c, *p;
     char quote = 0;
@@ -170,8 +168,7 @@ CSV_context *ctx;
 }
 
 int
-skip_csv_row(ctx)
-CSV_context * ctx;
+skip_csv_row(CSV_context *ctx)
 {
 
     int ret, quote = 0;
@@ -198,9 +195,7 @@ CSV_context * ctx;
 }
 
 int
-read_into_array(a, ctx)
-ARRAY *a;
-CSV_context *ctx;
+read_into_array(ARRAY *a, CSV_context *ctx)
 {
     int sep;
     char *buf;
@@ -222,11 +217,7 @@ CSV_context *ctx;
 }
 
 int
-read_into_assoc(name, assoc, header, ctx)
-char *name;
-SHELL_VAR *assoc;
-ARRAY *header;
-CSV_context *ctx;
+read_into_assoc(char *name, SHELL_VAR *assoc, ARRAY *header, CSV_context *ctx)
 {
     HASH_TABLE *h;
     int ret;
@@ -272,8 +263,7 @@ CSV_context *ctx;
 
 
 int
-csv_builtin(list)
-WORD_LIST *list;
+csv_builtin(WORD_LIST *list)
 {
     SHELL_VAR *var;
     ARRAY *a = NULL;
