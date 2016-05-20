@@ -261,7 +261,7 @@ csv_builtin(WORD_LIST *list)
     char *word;
     char *buf = NULL;
     intmax_t intval;
-    int opt, sep, eor, ret;
+    int opt, sep, eor, eos, ret;
     int use_array = 0;
 
     CSV_context ctx = {
@@ -356,18 +356,23 @@ csv_builtin(WORD_LIST *list)
     }
     list = loptend;
 
-    eor = 0;
+    eor = eos = 0;
     while (list) {
         word = list->word->word;
         if ( eor )
             bind_read_variable(word, "");
         else {
-            while ( (sep = read_csv_field(&buf, &ctx)) >= 0 && skip_field(&ctx) ) {
+            while ( !eos && (sep = read_csv_field(&buf, &ctx)) >= 0 && skip_field(&ctx) ) {
                 if ( sep == ctx.rs || ctx.rs == -1 && sep == '\n' ) {
                     eor = 1;
                     break;
                 }
                 xfree(buf);
+            }
+            if (sep == -1) {
+                if (eos)
+                    return EXECUTION_FAILURE;
+                eos = 1;
             }
 
             if ( skip_field(&ctx) )
@@ -379,6 +384,8 @@ csv_builtin(WORD_LIST *list)
 
         list = list->next;
     }
+    if (sep == -1 && buf[0] == 0)
+        return EXECUTION_FAILURE;
     if ( !(sep == ctx.rs || ctx.rs == -1 && sep == '\n') )
         skip_csv_row(&ctx);
     zsyncfd(ctx.fd);
