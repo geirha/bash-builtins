@@ -68,10 +68,11 @@ CSV_context *ctx;
     size_t size;
     if ( !isdigit(*s) )
         return 0;
-    
+
     array = xmalloc(sizeof(int) * 100);   // TODO: realloc as necessary
     size = 0;
 
+    // TODO: handle starting -N and ending N-
     for (c = strtok_r(s, ",", &bc); c; c = strtok_r(NULL, ",", &bc)) {
         d = strtok_r(c, "-", &bd);
         ret = legal_number(d, &intval);
@@ -98,7 +99,7 @@ CSV_context *ctx;
 }
 
 
-/* 
+/*
  *  field is malloced, and filled with the next field separated either by the
  *  field separator or record separator. Caller should free it.
  *
@@ -130,7 +131,7 @@ CSV_context *ctx;
                 else
                     p[n++] = c;
             }
-            else 
+            else
                 p[n++] = c;
         }
         if (!quote) {
@@ -150,13 +151,13 @@ CSV_context *ctx;
             p = xrealloc(p, (alloced += 1024) * sizeof(char));
         }
     }
-    
+
     p[n] = '\0';
     *field = p;
 
     if (ret <= 0)
         return -1;
-    
+
     return c;
 }
 
@@ -199,7 +200,6 @@ CSV_context *ctx;
     array_flush(a);     // a=()
     while ( (sep = read_csv_field(&buf, ctx)) >= 0 ) {
         if ( !skip_field(ctx->col, ctx) )
-            //TODO: array_insert may not be enough. Needs more work
             array_insert(a, ctx->col, buf);     // a[col]=$buf
         xfree(buf);
         if (sep == ctx->rs || ctx->rs == -1 && sep == '\n')
@@ -214,32 +214,39 @@ CSV_context *ctx;
 }
 
 int
-read_into_assoc(h, header, ctx)
-HASH_TABLE *h;
+read_into_assoc(name, assoc, header, ctx)
+char *name;
+SHELL_VAR *assoc;
 ARRAY *header;
 CSV_context *ctx;
 {
-    int sep;
+    HASH_TABLE *h;
+    int ret;
     char *key, *buf, ibuf[INT_STRLEN_BOUND (intmax_t) + 1];
 
-    assoc_flush(h);  // h=()
+    h = assoc_cell(assoc);
 
-    // if header is an empty array, read the row into header instead
-    if ( header && array_empty(header) )
-        return read_into_array(header, ctx);
-    
-    while ( (sep = read_csv_field(&buf, ctx)) >= 0 ) {
+    // h=()
+    assoc_flush(h);
+    VUNSETATTR(assoc, att_invisible);
+
+    // if header is an empty array, read a row into header first
+    if ( header && array_empty(header) && (ret = read_into_array(header, ctx)) != 0 )
+        return ret;
+
+    ctx->col = -1;
+
+    while ( (ret = read_csv_field(&buf, ctx)) >= 0 ) {
         if ( !skip_field(ctx->col, ctx) ) {
             key = NULL;
             if (header)
                 key = array_reference(header, ctx->col);
             if (key == NULL)
                 key = fmtulong(ctx->col, 10, ibuf, sizeof(ibuf), 0);
-            //TODO: assoc_insert is not enough. Needs more work
-            assoc_insert(h, savestring(key), buf);  // h[${header[col]-$col}]=$buf  
+            assoc_insert(h, savestring(key), buf);  // h[${header[col]-$col}]=$buf
         }
         xfree(buf);
-        if (sep == ctx->rs || ctx->rs == -1 && sep == '\n')
+        if (ret == ctx->rs || ctx->rs == -1 && ret == '\n')
             return EXECUTION_SUCCESS;
     }
     if (buf[0] && !skip_field(ctx->col, ctx)) {
@@ -248,7 +255,7 @@ CSV_context *ctx;
             key = array_reference(header, ctx->col);
         if (key == NULL)
             key = fmtulong(ctx->col, 10, ibuf, sizeof(ibuf), 0);
-        assoc_insert(h, savestring(key), buf);  // h[${header[col]-$col}]=$buf  
+        assoc_insert(h, savestring(key), buf);  // h[${header[col]-$col}]=$buf
         return EXECUTION_SUCCESS;
     }
     xfree(buf);
@@ -299,7 +306,7 @@ WORD_LIST *list;
                 }
                 break;
             case 'd': ctx.rs = list_optarg[0]; break;
-            case 'f': 
+            case 'f':
                 if (parse_list(list_optarg, &ctx) == 0) {
                     builtin_error("-f: illegal list value");
                     return EXECUTION_FAILURE;
@@ -307,7 +314,7 @@ WORD_LIST *list;
                 break;
             case 'F': ctx.fs = list_optarg[0]; break;
             case 'q': ctx.q = list_optarg[0]; break;
-            case 'u': 
+            case 'u':
                 ret = legal_number(list_optarg, &intval);
                 if (ret == 0 || intval < 0 || intval != (int) intval) {
                     builtin_error ("%s: invalid file descriptor specification", list_optarg);
@@ -337,7 +344,11 @@ WORD_LIST *list;
             builtin_usage();
             return EX_USAGE;
         }
-        return read_into_array(array_cell(find_or_make_array_variable(list->word->word, 1)), &ctx);
+
+        if ( (var = find_or_make_array_variable(list->word->word, 1)) == 0 )
+            return EXECUTION_FAILURE;
+
+        return read_into_array(array_cell(var), &ctx);
     }
     else if (use_array == 'A') {
         if (legal_identifier(list->word->word) == 0) {
@@ -349,9 +360,14 @@ WORD_LIST *list;
                 sh_invalidid(list->word->word);
                 return EXECUTION_FAILURE;
             }
-            a = array_cell(find_or_make_array_variable(list->next->word->word, 1));
+            if ( (var = find_or_make_array_variable(list->next->word->word, 1)) == 0 )
+                return EXECUTION_FAILURE;
+
+            a = array_cell(var);
         }
-        return read_into_assoc(assoc_cell(find_or_make_array_variable(list->word->word, 1|2)), a, &ctx);
+        if ( (var = find_or_make_array_variable(list->word->word, 1|2)) == 0 )
+            return EXECUTION_FAILURE;
+        return read_into_assoc(list->word->word, var, a, &ctx);
     }
 
     if (legal_identifier (list->word->word) == 0 && valid_array_reference (list->word->word, 0) == 0) {
@@ -380,14 +396,14 @@ WORD_LIST *list;
                 xfree(buf);
             }
             printf("buf: %s, col: %d, sep: %02x\n", buf, ctx.col, sep);
-            
+
             if ( skip_field(ctx.col, &ctx) )
                 bind_read_variable(word, "");
             else
                 bind_read_variable(word, buf);
             xfree(buf);
         }
-        
+
         list = list->next;
     }
     if ( !(sep == ctx.rs || ctx.rs == -1 && sep == '\n') )
@@ -408,12 +424,11 @@ char *csv_doc[] = {
     "",
     "Options:",
     "  -a       assign the fields read to sequential indices of the array",
-    "           named by the first NAME", 
+    "           named by the first NAME",
     "  -A       assign the fields read to sequential indices of the array",
     "           named by the first NAME. A second NAME to an indexed array",
     "           may be provided, and will be used as keys. If second NAME",
-    "           is an empty array, the fields are read into that array",
-    "           instead.", 
+    "           is an empty array, a row is read into that array first.",
     "  -d delim read until the first character of DELIM is read,",
     "           rather than newline or carriage return and newline.",
     "  -f list  read only the listed fields. LIST is a comma separated list",
