@@ -397,11 +397,11 @@ char *csv_doc[] = {
     "",
     "Options:",
     "  -a       assign the fields read to sequential indices of the array",
-    "           named by the first NAME",
-    "  -A       assign the fields read to sequential indices of the array",
-    "           named by the first NAME. A second NAME to an indexed array",
-    "           may be provided, and will be used as keys. If second NAME",
-    "           is an empty array, a row is read into that array first.",
+    "           named by the first NAME, which may be associative.",
+    "           If a second NAME to an indexed array is provided, its values",
+    "           will be used as keys if the first NAME is an associative",
+    "           array. If the second NAME is empty, a row will be read into",
+    "           it first",
     "  -d delim read until the first character of DELIM is read,",
     "           rather than newline or carriage return and newline.",
     "  -f list  read only the listed fields. LIST is a comma separated list",
@@ -422,7 +422,7 @@ struct builtin csv_struct = {
     csv_builtin,
     BUILTIN_ENABLED,
     csv_doc,
-    "csv [-a | -A] [-d delim] [-f list] [-F sep] [-q quote] [-u fd] name ...",
+    "csv [-a] [-d delim] [-f list] [-F sep] [-q quote] [-u fd] name ...",
     0
 };
 
