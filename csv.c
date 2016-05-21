@@ -41,7 +41,7 @@ bind_read_variable (name, value)
 int
 skip_field(CSV_context *ctx)
 {
-    if ( ctx->col > array_max_index(ctx->cut) && ctx->to_inf )
+    if ( ctx->cut == 0 || ctx->col > array_max_index(ctx->cut) && ctx->to_inf )
         return 0;
     return array_reference(ctx->cut, ctx->col) ? 0 : 1;
 }
@@ -109,7 +109,7 @@ parse_list(char *s, CSV_context *ctx)
 
 /*
  *  field is malloced, and filled with the next field separated either by the
- *  field separator or record separator. Caller should free it.
+ *  field separator or row separator. Caller should free it.
  *
  *  returns the separator (fs or rs or '\n') or -1 if eof or error
  * TODO: print error messages
@@ -223,7 +223,7 @@ read_into_array(SHELL_VAR *array, SHELL_VAR *header, CSV_context *ctx) {
                 key = NULL;
                 if (header_a)
                     key = array_reference(header_a, ctx->col);
-                if (key == NULL)
+                if (key == NULL || key[0] == '\0' )
                     key = fmtulong(ctx->col, 10, ibuf, sizeof(ibuf), 0);
                 assoc_insert(row_h, savestring(key), value);
             }
@@ -239,7 +239,7 @@ read_into_array(SHELL_VAR *array, SHELL_VAR *header, CSV_context *ctx) {
             key = NULL;
             if (header_a)
                 key = array_reference(header_a, ctx->col);
-            if (key == NULL)
+            if (key == NULL || key[0] == '\0' )
                 key = fmtulong(ctx->col, 10, ibuf, sizeof(ibuf), 0);
             assoc_insert(row_h, savestring(key), value);
         }
@@ -412,7 +412,7 @@ char *csv_doc[] = {
     "  -d delim read until the first character of DELIM is read,",
     "           rather than newline or carriage return and newline.",
     "  -f list  read only the listed fields. LIST is a comma separated list",
-    "           of numbers and ranges. e.g. -f0-2,5,7-8 will pick fields",
+    "           of numbers and ranges. e.g. -f-2,5,7-8 will pick fields",
     "           0, 1, 2, 5, 7, and 8.",
     "  -F sep   split fields on SEP instead of comma",
     "  -q quote use QUOTE as quote character, rather than `\"'.",
