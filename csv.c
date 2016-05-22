@@ -198,51 +198,41 @@ int
 read_into_array(SHELL_VAR *array, SHELL_VAR *header, CSV_context *ctx) {
 
     int ret;
-    char *key, *value, ibuf[INT_STRLEN_BOUND (intmax_t) + 1];
-    ARRAY *row_a = NULL, *header_a = NULL;
-    HASH_TABLE *row_h = NULL;
+    char *key, *value;
+    char ibuf[INT_STRLEN_BOUND (intmax_t) + 1]; // used by fmtulong
     
-    
-    if ( header ) {
-        header_a = array_cell(header);
-        if ( array_empty(header_a) )
-            read_into_array(header, NULL, ctx);
-    }
+    if ( header && array_empty(array_cell(header)) )
+        read_into_array(header, NULL, ctx);
 
-    if ( assoc_p(array) )
-        row_h = assoc_cell(array);
-    else
-        row_a = array_cell(array);
-    
     ctx->col = -1;
     while ( (ret = read_csv_field(&value, ctx)) >= 0 ) {
         if ( !skip_field(ctx) ) {
-            if (row_a)
-                array_insert(row_a, ctx->col, value);
-            else if (row_h) {
+            if ( assoc_p(array) ) {
                 key = NULL;
-                if (header_a)
-                    key = array_reference(header_a, ctx->col);
-                if (key == NULL || key[0] == '\0' )
+                if ( header )
+                    key = array_reference(array_cell(header), ctx->col);
+                if ( key == NULL || key[0] == '\0' )
                     key = fmtulong(ctx->col, 10, ibuf, sizeof(ibuf), 0);
-                assoc_insert(row_h, savestring(key), value);
+                bind_assoc_variable(array, array->name, key, value, 0);
             }
+            else
+                bind_array_element(array, ctx->col, value, 0);
         }
         xfree(value);
         if ( ret == ctx->rs || ctx->rs == -1 && ret == '\n' )
             return EXECUTION_SUCCESS;
     }
     if ( value[0] && !skip_field(ctx) ) {
-        if (row_a)
-            array_insert(row_a, ctx->col, value);
-        else if (row_h) {
+        if (assoc_p(array)) {
             key = NULL;
-            if (header_a)
-                key = array_reference(header_a, ctx->col);
-            if (key == NULL || key[0] == '\0' )
+            if ( header )
+                key = array_reference(array_cell(header), ctx->col);
+            if ( key == NULL || key[0] == '\0' )
                 key = fmtulong(ctx->col, 10, ibuf, sizeof(ibuf), 0);
-            assoc_insert(row_h, savestring(key), value);
+            bind_assoc_variable(array, array->name, key, value, 0);
         }
+        else
+            bind_array_element(array, ctx->col, value, 0);
         xfree(value);
         return EXECUTION_SUCCESS;
     }
