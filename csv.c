@@ -310,7 +310,7 @@ csv_builtin(WORD_LIST *list)
             array = find_or_make_array_variable(list->word->word, 1|2);
             if ( array == 0 )
                 return EXECUTION_FAILURE;
-            assoc_flush(assoc_cell(array));
+            //assoc_flush(assoc_cell(array));
         }
         else {
             array = find_or_make_array_variable(list->word->word, 1);
