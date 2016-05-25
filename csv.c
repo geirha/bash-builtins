@@ -213,7 +213,7 @@ read_into_array(SHELL_VAR *array, SHELL_VAR *header, CSV_context *ctx) {
                     key = array_reference(array_cell(header), ctx->col);
                 if ( key == NULL || key[0] == '\0' )
                     key = fmtulong(ctx->col, 10, ibuf, sizeof(ibuf), 0);
-                bind_assoc_variable(array, array->name, key, value, 0);
+                bind_assoc_variable(array, array->name, savestring(key), value, 0);
             }
             else
                 bind_array_element(array, ctx->col, value, 0);
@@ -229,7 +229,7 @@ read_into_array(SHELL_VAR *array, SHELL_VAR *header, CSV_context *ctx) {
                 key = array_reference(array_cell(header), ctx->col);
             if ( key == NULL || key[0] == '\0' )
                 key = fmtulong(ctx->col, 10, ibuf, sizeof(ibuf), 0);
-            bind_assoc_variable(array, array->name, key, value, 0);
+            bind_assoc_variable(array, array->name, savestring(key), value, 0);
         }
         else
             bind_array_element(array, ctx->col, value, 0);
@@ -310,7 +310,7 @@ csv_builtin(WORD_LIST *list)
             array = find_or_make_array_variable(list->word->word, 1|2);
             if ( array == 0 )
                 return EXECUTION_FAILURE;
-            //assoc_flush(assoc_cell(array));
+            assoc_flush(assoc_cell(array));
         }
         else {
             array = find_or_make_array_variable(list->word->word, 1);
