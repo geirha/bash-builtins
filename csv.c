@@ -17,6 +17,7 @@ typedef struct CSV_context {
     int q;      // quote character (default: '"')
     ARRAY *cut; // list of fields to include
     int to_inf; // 1 if -f ended with N-, 0 otherwise
+    int print_mode;
 } CSV_context;
 
 /* Copied from builtins/read.def */
@@ -39,11 +40,11 @@ bind_read_variable (name, value)
 }
 
 int
-skip_field(CSV_context *ctx)
+skip_field(arrayind_t n, CSV_context *ctx)
 {
-    if ( ctx->cut == 0 || ctx->col > array_max_index(ctx->cut) && ctx->to_inf )
+    if ( ctx->cut == 0 || n > array_max_index(ctx->cut) && ctx->to_inf )
         return 0;
-    return array_reference(ctx->cut, ctx->col) ? 0 : 1;
+    return array_reference(ctx->cut, n) ? 0 : 1;
 }
 
 int
@@ -206,7 +207,7 @@ read_into_array(SHELL_VAR *array, SHELL_VAR *header, CSV_context *ctx) {
 
     ctx->col = -1;
     while ( (ret = read_csv_field(&value, ctx)) >= 0 ) {
-        if ( !skip_field(ctx) ) {
+        if ( !skip_field(ctx->col, ctx) ) {
             if ( assoc_p(array) ) {
                 key = NULL;
                 if ( header )
@@ -222,7 +223,7 @@ read_into_array(SHELL_VAR *array, SHELL_VAR *header, CSV_context *ctx) {
         if ( ret == ctx->rs || ctx->rs == -1 && ret == '\n' )
             return EXECUTION_SUCCESS;
     }
-    if ( value[0] && !skip_field(ctx) ) {
+    if ( value[0] && !skip_field(ctx->col, ctx) ) {
         if (assoc_p(array)) {
             key = NULL;
             if ( header )
@@ -239,6 +240,98 @@ read_into_array(SHELL_VAR *array, SHELL_VAR *header, CSV_context *ctx) {
     xfree(value);
     return EXECUTION_FAILURE;
 
+}
+
+void
+print_field(char *word, CSV_context *ctx) {
+    char special[5];
+    size_t i, n = 0;
+
+    if (ctx->q > 0)
+        special[n++] = ctx->q;
+    if (ctx->fs > 0)
+        special[n++] = ctx->fs;
+    if (ctx->rs > 0)
+        special[n++] = ctx->rs;
+    else if (ctx->rs == -1) {
+        special[n++] = '\r';
+        special[n++] = '\n';
+    }
+    special[n] = '\0';
+
+    if ( strpbrk(word, special) ) {
+        putchar(ctx->q);
+        while (*word) {
+            if (*word == ctx->q)
+                putchar(ctx->q);
+            putchar(*word);
+            word++;
+        }
+        putchar(ctx->q);
+    }
+    else
+        printf("%s", word);
+}
+
+void
+print_array(ARRAY *a, CSV_context *ctx) {
+    ARRAY_ELEMENT *ae;
+    int first_printed = 0;
+
+    if ( !a )
+        return;
+
+    for (ae = element_forw(a->head); ae != a->head; ae = element_forw(ae)) {
+        if ( skip_field(element_index(ae), ctx) )
+            continue;
+        if ( first_printed )
+            putchar(ctx->fs);
+        print_field(element_value(ae), ctx);
+        first_printed = 1;
+    }
+    if ( ctx->rs == -1 )
+        printf("\r\n");
+    else
+        putchar(ctx->rs);
+}
+
+static char unsigned assoc_no_header_warn = 0;
+
+void
+print_assoc(HASH_TABLE *hash, ARRAY *header, CSV_context *ctx) {
+    ARRAY_ELEMENT *ae;
+    int first_printed = 0;
+    char *data;
+
+    if ( !hash ) {
+        if ( ctx->rs == -1 )
+            printf("\r\n");
+        else
+            putchar(ctx->rs);
+        return;
+    }
+
+    if ( !header ) {
+        if ( !assoc_no_header_warn++ )
+            builtin_warning("Associative array without header. Values will be printed in arbitrary order"); 
+        print_array(array_from_word_list(assoc_to_word_list(hash)), ctx);
+        return;
+    }
+
+    for (ae = element_forw(header->head); ae != header->head; ae = element_forw(ae)) {
+        if ( skip_field(element_index(ae), ctx) )
+            continue;
+        if ( first_printed )
+            putchar(ctx->fs);
+        data = assoc_reference(hash, element_value(ae));
+        if (data)
+            print_field(data, ctx);
+        first_printed = 1;
+    }
+    if ( ctx->rs == -1 )
+        printf("\r\n");
+    else
+        printf("\n");
 }
 
 int
@@ -261,12 +354,13 @@ csv_builtin(WORD_LIST *list)
         ',',    // fs
         '"',    // q
         0,      // cut array
-        0       // to_inf
+        0,      // to_inf
+        0       // print_mode
     };
 
 
     reset_internal_getopt();
-    while ( (opt = internal_getopt(list, "ad:f:F:q:u:")) != -1 ) {
+    while ( (opt = internal_getopt(list, "ad:f:F:pq:u:")) != -1 ) {
         switch (opt) {
             case 'a': use_array=1; break;
             case 'd': ctx.rs = list_optarg[0]; break;
@@ -277,6 +371,7 @@ csv_builtin(WORD_LIST *list)
                 }
                 break;
             case 'F': ctx.fs = list_optarg[0]; break;
+            case 'p': ctx.print_mode = 1; break;
             case 'q': ctx.q = list_optarg[0]; break;
             case 'u':
                 ret = legal_number(list_optarg, &intval);
@@ -310,13 +405,15 @@ csv_builtin(WORD_LIST *list)
             array = find_or_make_array_variable(list->word->word, 1|2);
             if ( array == 0 )
                 return EXECUTION_FAILURE;
-            assoc_flush(assoc_cell(array));
+            if ( !ctx.print_mode )
+                assoc_flush(assoc_cell(array));
         }
         else {
             array = find_or_make_array_variable(list->word->word, 1);
             if ( array == 0 )
                 return EXECUTION_FAILURE;
-            array_flush(array_cell(array));
+            if ( !ctx.print_mode )
+                array_flush(array_cell(array));
         }
         VUNSETATTR(array, att_invisible);
         
@@ -326,19 +423,35 @@ csv_builtin(WORD_LIST *list)
                 sh_invalidid(list->word->word);
                 return EXECUTION_FAILURE;
             }
-            header = find_or_make_array_variable(list->word->word, 1);
+            //header = find_or_make_array_variable(list->word->word, 1);
+            header = find_variable(list->word->word);
             if ( header == 0 )
                 return EXECUTION_FAILURE;
             VUNSETATTR(header, att_invisible);
         }
-        ret = read_into_array(array, header, &ctx);
-        zsyncfd(ctx.fd);
+        if ( ctx.print_mode ) {
+            if ( assoc_p(array) )
+                print_assoc(assoc_cell(array), header ? array_cell(header) : NULL, &ctx);
+            else if ( array_p(array) )
+                print_array(array_cell(array), &ctx);
+            return EXECUTION_SUCCESS;
+        }
+        else {
+            ret = read_into_array(array, header, &ctx);
+            zsyncfd(ctx.fd);
+        }
         return ret;
     }
 
+    if ( ctx.print_mode ) {
+        print_array(array_from_word_list(list), &ctx);
+        return EXECUTION_SUCCESS;
+    }
+
+
     // Let's go through the list before-hand and check if any of the variables are invalid
-    while (list) {
-        if (legal_identifier (list->word->word) == 0 && valid_array_reference (list->word->word, 0) == 0) {
+    while ( list ) {
+        if ( legal_identifier (list->word->word) == 0 && valid_array_reference (list->word->word, 0) == 0 ) {
             sh_invalidid(list->word->word);
             return EXECUTION_FAILURE;
         }
@@ -352,7 +465,7 @@ csv_builtin(WORD_LIST *list)
         if ( eor )
             bind_read_variable(word, "");
         else {
-            while ( !eos && (sep = read_csv_field(&buf, &ctx)) >= 0 && skip_field(&ctx) ) {
+            while ( !eos && (sep = read_csv_field(&buf, &ctx)) >= 0 && skip_field(ctx.col, &ctx) ) {
                 if ( sep == ctx.rs || ctx.rs == -1 && sep == '\n' ) {
                     eor = 1;
                     break;
@@ -365,7 +478,7 @@ csv_builtin(WORD_LIST *list)
                 eos = 1;
             }
 
-            if ( skip_field(&ctx) )
+            if ( skip_field(ctx.col, &ctx) )
                 bind_read_variable(word, "");
             else
                 bind_read_variable(word, buf);
@@ -387,7 +500,7 @@ char *csv_doc[] = {
     "",
     "Reads a CSV row from standard input, or from file descriptor FD",
     "if the -u option is supplied.  The line is split into fields on",
-    "commas, or sep if the -f option is supplied, and the first field",
+    "commas, or sep if the -F option is supplied, and the first field",
     "is assigned to the first NAME, the second field to the second",
     "NAME, and so on.  If there are more fields in the row than",
     "supplied NAMEs, the remaining fields are read and discarded.",
@@ -405,6 +518,11 @@ char *csv_doc[] = {
     "           of numbers and ranges. e.g. -f-2,5,7-8 will pick fields",
     "           0, 1, 2, 5, 7, and 8.",
     "  -F sep   split fields on SEP instead of comma",
+    "  -p       print a csv row instead of reading one. Each NAME are printed",
+    "           separated by SEP, and quoted if necessary. If the -a option",
+    "           is supplied, the first NAME is treated as an array holding the",
+    "           values for the row. A second NAME may be provided to specify",
+    "           the order of the printed fields.",
     "  -q quote use QUOTE as quote character, rather than `\"'.",
     "  -u fd    read from file descriptor FD instead of the standard input.",
     "",
@@ -419,7 +537,7 @@ struct builtin csv_struct = {
     csv_builtin,
     BUILTIN_ENABLED,
     csv_doc,
-    "csv [-a] [-d delim] [-f list] [-F sep] [-q quote] [-u fd] name ...",
+    "csv [-ap] [-d delim] [-f list] [-F sep] [-q quote] [-u fd] name ...",
     0
 };
 
