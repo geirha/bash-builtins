@@ -39,6 +39,73 @@ compare(const void *p1, const void *p2) {
 }
 
 static int
+sort_index(SHELL_VAR *dest, SHELL_VAR *source) {
+    HASH_TABLE *hash;
+    BUCKET_CONTENTS *bucket;
+    sort_element *sa;
+    ARRAY *array, *dest_array;
+    ARRAY_ELEMENT *ae;
+    size_t i, j, n;
+    char ibuf[INT_STRLEN_BOUND (intmax_t) + 1]; // used by fmtulong
+
+    dest_array = array_cell(dest);
+
+    if (assoc_p(source)) {
+        hash = assoc_cell(source);
+        n = hash->nentries;
+        sa = xmalloc(n * sizeof(sort_element));
+        i = 0;
+        for ( j = 0; j < hash->nbuckets; ++j ) {
+            bucket = hash->bucket_array[j];
+            while ( bucket ) {
+                sa[i].v = NULL;
+                sa[i].key = bucket->key;
+                if ( numeric_flag )
+                    sa[i].num = strtod(bucket->data, NULL);
+                else
+                    sa[i].value = bucket->data;
+                i++;
+                bucket = bucket->next;
+            }
+        }
+    }
+    else {
+        array = array_cell(source);
+        n = array_num_elements(array);
+        sa = xmalloc(n * sizeof(sort_element));
+        i = 0;
+
+        for (ae = element_forw(array->head); ae != array->head; ae = element_forw(ae)) {
+            sa[i].v = ae;
+            if (numeric_flag)
+                sa[i].num = strtod(element_value(ae), NULL);
+            else
+                sa[i].value = element_value(ae);
+            i++;
+        }
+    }
+
+    // sanity check
+    if ( i != n ) {
+        builtin_error("%s: corrupt array", source->name);
+        return EXECUTION_FAILURE;
+    }
+
+    qsort(sa, n, sizeof(sort_element), compare);
+
+    array_flush(dest_array);
+
+    for ( i = 0; i < n; ++i ) {
+        if ( assoc_p(source) )
+            array_insert(dest_array, i, sa[i].key);
+        else
+            array_insert(dest_array, i, fmtulong((long unsigned)sa[i].value, 10, ibuf, sizeof(ibuf), 0));
+    }
+
+    return EXECUTION_SUCCESS;
+}
+
+static int
 sort_inplace(SHELL_VAR *var) {
     size_t i, n;
     ARRAY *a;
@@ -56,9 +123,10 @@ sort_inplace(SHELL_VAR *var) {
     i = 0;
     for (ae = element_forw(a->head); ae != a->head; ae = element_forw(ae)) {
         sa[i].v = ae;
-        sa[i].value = element_value(ae);
         if (numeric_flag)
             sa[i].num = strtod(element_value(ae), NULL);
+        else
+            sa[i].value = element_value(ae);
         i++;
     }
 
@@ -87,19 +155,19 @@ sort_inplace(SHELL_VAR *var) {
 }
 
 int
-asort_builtin(list)
-    WORD_LIST *list;
-{
-    SHELL_VAR *var;
+asort_builtin(WORD_LIST *list) {
+    SHELL_VAR *var, *var2;
     char *word;
     int opt, ret;
+    int index_flag = 0;
 
     numeric_flag = 0;
     reverse_flag = 0;
 
     reset_internal_getopt();
-    while ((opt = internal_getopt(list, "nr")) != -1) {
+    while ((opt = internal_getopt(list, "inr")) != -1) {
         switch (opt) {
+            case 'i': index_flag = 1; break;
             case 'n': numeric_flag = 1; break;
             case 'r': reverse_flag = 1; break;
             CASE_HELPOPT;
@@ -115,6 +183,21 @@ asort_builtin(list)
         return EX_USAGE;
     }
 
+    if ( index_flag ) {
+        if ( list->next == 0 || list->next->next ) {
+            builtin_usage();
+            return EX_USAGE;
+        }
+        var = find_or_make_array_variable(list->word->word, 1);
+        if (var == 0)
+            return EXECUTION_FAILURE;
+        var2 = find_variable(list->next->word->word);
+        if ( !var2 || ( !array_p(var2) && !assoc_p(var2) ) ) {
+            builtin_error("%s: Not an array", list->next->word->word);
+            return EXECUTION_FAILURE;
+        }
+        return sort_index(var, var2);
+    }
 
     while (list) {
         word = list->word->word;
@@ -144,6 +227,14 @@ char *asort_doc[] = {
     "Options:",
     "  -n  compare according to string numerical value",
     "  -r  reverse the result of comparisons",
+    "",
+    "If -i is supplied, SOURCE is not sorted in-place, but the indices (or keys",
+    "if associative) of SOURCE, after sorting it by its values, are placed as",
+    "values in the indexed array DEST",
+    "",
+    "Exit status:",
+    "Return value is zero unless an error happened (like invalid variable name",
+    "or readonly array).",
     (char *)NULL
 };
 
@@ -152,7 +243,7 @@ struct builtin asort_struct = {
     asort_builtin,
     BUILTIN_ENABLED,
     asort_doc,
-    "asort [-nr] array...",
+    "asort [-nr] array ...  or  asort [-nr] -i DEST SOURCE",
     0
 };
 
