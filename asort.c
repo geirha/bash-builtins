@@ -10,8 +10,10 @@
 #include "bashgetopt.h"
 
 typedef struct sort_element {
-    ARRAY_ELEMENT *v;
-    double num; // used for numeric sort
+    ARRAY_ELEMENT *v;   // used when sorting array in-place
+    char *key;          // used when sorting assoc array
+    char *value;        // points to value of array element or assoc entry
+    double num;         // used for numeric sort
 } sort_element;
 
 static int reverse_flag;
@@ -30,10 +32,58 @@ compare(const void *p1, const void *p2) {
     }
     else {
         if (reverse_flag)
-            return strcoll(e2.v->value, e1.v->value);
+            return strcoll(e2.value, e1.value);
         else
-            return strcoll(e1.v->value, e2.v->value);
+            return strcoll(e1.value, e2.value);
     }
+}
+
+static int
+sort_inplace(SHELL_VAR *var) {
+    size_t i, n;
+    ARRAY *a;
+    ARRAY_ELEMENT *ae;
+    sort_element *sa = 0;
+
+    a = array_cell(var);
+    n = array_num_elements(a);
+
+    if ( n == 0 )
+        return EXECUTION_SUCCESS;
+
+    sa = xmalloc(n * sizeof(sort_element));
+
+    i = 0;
+    for (ae = element_forw(a->head); ae != a->head; ae = element_forw(ae)) {
+        sa[i].v = ae;
+        sa[i].value = element_value(ae);
+        if (numeric_flag)
+            sa[i].num = strtod(element_value(ae), NULL);
+        i++;
+    }
+
+    // sanity check
+    if ( i != n ) {
+        builtin_error("%s: corrupt array", var->name);
+        return EXECUTION_FAILURE;
+    }
+
+    qsort(sa, n, sizeof(sort_element), compare);
+
+    // for in-place sort, simply "rewire" the array elements
+    sa[0].v->prev = sa[n-1].v->next = a->head;
+    a->head->next = sa[0].v;
+    a->head->prev = sa[n-1].v;
+    a->max_index = n - 1;
+    for (i = 0; i < n; i++) {
+        sa[i].v->ind = i;
+        if (i > 0)
+            sa[i].v->prev = sa[i-1].v;
+        if (i < n - 1)
+            sa[i].v->next = sa[i+1].v;
+    }
+    xfree(sa);
+    return EXECUTION_SUCCESS;
 }
 
 int
@@ -41,13 +91,8 @@ asort_builtin(list)
     WORD_LIST *list;
 {
     SHELL_VAR *var;
-    ARRAY *a;
-    ARRAY_ELEMENT *ae, *n;
-    sort_element *sa;
-    size_t i;
-    int done = 0;
     char *word;
-    int opt;
+    int opt, ret;
 
     numeric_flag = 0;
     reverse_flag = 0;
@@ -67,15 +112,14 @@ asort_builtin(list)
 
     if (list == 0) {
         builtin_usage();
-        return(EX_USAGE);
+        return EX_USAGE;
     }
 
-    sa = 0;
 
     while (list) {
         word = list->word->word;
-        list = list->next;
         var = find_variable(word);
+        list = list->next;
 
         if (var == 0 || array_p(var) == 0) {
             builtin_error("%s: Not an array", word);
@@ -87,36 +131,11 @@ asort_builtin(list)
             continue;
         }
 
-        a = array_cell(var);
-
-        if (a->num_elements == 0)
-            continue;
-
-        sa = xrealloc(sa, a->num_elements * sizeof(sort_element));
-
-        i = 0;
-        for (ae = a->head->next; ae != a->head; ae = ae->next) {
-            sa[i].v = ae;
-            if (numeric_flag)
-                sa[i].num = strtod(ae->value, NULL);
-            i++;
-        }
-        qsort(sa, a->num_elements, sizeof(sort_element), compare);
-
-        sa[0].v->prev = sa[a->num_elements-1].v->next = a->head;
-        a->head->next = sa[0].v;
-        a->head->prev = sa[a->num_elements-1].v;
-        a->max_index = a->num_elements - 1;
-        for (i = 0; i < a->num_elements; i++) {
-            sa[i].v->ind = i;
-            if (i > 0)
-                sa[i].v->prev = sa[i-1].v;
-            if (i < a->num_elements - 1)
-                sa[i].v->next = sa[i+1].v;
-        }
+        if ( (ret = sort_inplace(var)) != EXECUTION_SUCCESS )
+            return ret;
     }
-    free(sa);
-    return (EXECUTION_SUCCESS);
+    return EXECUTION_SUCCESS;
+
 }
 
 char *asort_doc[] = {
