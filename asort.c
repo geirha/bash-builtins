@@ -47,6 +47,7 @@ sort_index(SHELL_VAR *dest, SHELL_VAR *source) {
     ARRAY_ELEMENT *ae;
     size_t i, j, n;
     char ibuf[INT_STRLEN_BOUND (intmax_t) + 1]; // used by fmtulong
+    char *key;
 
     dest_array = array_cell(dest);
 
@@ -97,9 +98,11 @@ sort_index(SHELL_VAR *dest, SHELL_VAR *source) {
 
     for ( i = 0; i < n; ++i ) {
         if ( assoc_p(source) )
-            array_insert(dest_array, i, sa[i].key);
+            key = sa[i].key;
         else
-            array_insert(dest_array, i, fmtulong((long unsigned)sa[i].value, 10, ibuf, sizeof(ibuf), 0));
+            key = fmtulong((long unsigned)sa[i].v->ind, 10, ibuf, sizeof(ibuf), 0);
+
+        array_insert(dest_array, i, key);
     }
 
     return EXECUTION_SUCCESS;
