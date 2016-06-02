@@ -496,7 +496,7 @@ csv_builtin(WORD_LIST *list)
 }
 
 char *csv_doc[] = {
-    "Read CSV rows",
+    "Read and write CSV rows.",
     "",
     "Reads a CSV row from standard input, or from file descriptor FD",
     "if the -u option is supplied.  The line is split into fields on",

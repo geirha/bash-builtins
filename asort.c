@@ -246,7 +246,7 @@ struct builtin asort_struct = {
     asort_builtin,
     BUILTIN_ENABLED,
     asort_doc,
-    "asort [-nr] array ...  or  asort [-nr] -i DEST SOURCE",
+    "asort [-nr] array ...  or  asort [-nr] -i dest source",
     0
 };
 

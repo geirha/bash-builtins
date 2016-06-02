@@ -1,6 +1,10 @@
 A small collection of loadable bash builtins I've written, mainly to see what
 is possible to do with loadable builtins. Some of these may be useful.
 
+* [asort](asort.md) - sort arrays in-place
+* [csv](csv.md) - read and write CSV rows
+* [md5](md5.md) - calculate md5 sum
+
 ## Preparation
 
 Currently bash 4.4 is not yet released, and one of the new things in bash 4.4
@@ -12,20 +16,20 @@ yourself, or at least configure it and install the headers
 
 If this is the first time, clone the repository
 
-```
+```bash
 git clone git://git.sv.gnu.org/bash.git
 ```
 
 Then enter the cloned repo, and switch to the devel branch:
 
-```
+```bash
 cd bash &&
 git checkout devel &&
 git pull
 ```
 
 Then configure it and run make on the `install-headers` target
-```
+```bash
 ./configure && make install-headers
 ```
 
@@ -37,7 +41,7 @@ header files.
 
 To build, just run
 
-```
+```bash
 make
 ```
 
