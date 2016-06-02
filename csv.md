@@ -148,3 +148,12 @@ Write the new file, including header.
     done
 } >books2.csv
 ```
+
+## Implementation notes
+
+The RFC "requires" rows to end with CRLF, but when parsing (and no `-d` is
+used), both CRLF and LF will be treated the same. When printing, each row is
+terminated by CRLF (unless you specify otherwise with `-d`). On UNIX and
+UNIX-like systems, it would make more sense to use just LF, so I might change
+the default to LF when printing, using CRLF only when some "strict" option or
+env var is used.
