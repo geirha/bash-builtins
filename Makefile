@@ -1,14 +1,16 @@
-CC = gcc
-CFLAGS += -DHAVE_CONFIG_H -Wno-parentheses $(shell pkg-config --cflags bash)
-LDFLAGS += -dynamiclib -dynamic -undefined dynamic_lookup
+prefix = /usr/local
+makefile_inc = $(prefix)/lib/bash/Makefile.inc
 
-builtins = asort md5 csv
+all: Makefile.inc
+	$(MAKE) -f Makefile.inc
 
-all: $(builtins)
-	@printf '\nDone. To load the builtins, run:\n\n'
-	@for x in $(builtins); do printf 'enable -f %s %s\n' "$$x" "$$x"; done
+Makefile.inc: Makefile.stub $(makefile_inc)
+	{ sed -e '/^all:/,$$d' $(makefile_inc);\
+	cat Makefile.stub;\
+	} > Makefile.inc
 
 clean:
-	rm -f $(builtins)
+	$(MAKE) -f Makefile.inc clean
+	rm -f Makefile.inc
 
 .PHONY: all clean

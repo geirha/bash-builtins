@@ -1,0 +1,25 @@
+CFLAGS += -std=gnu99
+builtins = asort md5 csv
+all: $(builtins)
+	@printf '\nDone. To load the builtins, run:\n\n'
+	@for x in $(builtins); do\
+	  printf 'enable -f ./%s %s\n' "$$x" "$$x";\
+	done
+
+asort:	asort.o
+	$(SHOBJ_LD) $(SHOBJ_LDFLAGS) $(SHOBJ_XLDFLAGS) -o $@ asort.o $(SHOBJ_LIBS)
+
+md5:	md5.o
+	$(SHOBJ_LD) $(SHOBJ_LDFLAGS) $(SHOBJ_XLDFLAGS) -o $@ md5.o $(SHOBJ_LIBS)
+
+csv:	csv.o
+	$(SHOBJ_LD) $(SHOBJ_LDFLAGS) $(SHOBJ_XLDFLAGS) -o $@ csv.o $(SHOBJ_LIBS)
+
+asort.o: asort.c
+md5.o: md5.c
+csv.o: csv.c
+
+clean:
+	rm -f $(builtins) ./*.o
+
+.PHONY: all clean

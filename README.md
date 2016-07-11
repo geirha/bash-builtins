@@ -30,10 +30,12 @@ git pull
 
 Then configure it and run make on the `install-headers` target
 ```bash
-./configure && make install-headers
+./configure &&
+make install-headers &&
+make -C examples/loadables install-dev
 ```
 
-The above should install `"$prefix/lib/pkgconfig/bash.pc"` in addition to some
+The above should install `"$prefix/lib/bash/Makefile.inc"` in addition to some
 header files.
 
 
@@ -43,6 +45,12 @@ To build, just run
 
 ```bash
 make
+```
+
+If you specified a --prefix on the configure, add this to make so it finds the installed files:
+
+```bash
+make prefix=/some/where
 ```
 
 ## Install
