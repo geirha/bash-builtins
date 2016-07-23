@@ -22,7 +22,7 @@ md5: md5 [string]
 md5 ''
 printf 'MD5 sum of the empty string is: %s\n' "$REPLY"
 ## Output:
-#MD5 sum of «hello» is: d41d8cd98f00b204e9800998ecf8427e
+#MD5 sum of the empty string is: d41d8cd98f00b204e9800998ecf8427e
 ```
 
 ```bash
