@@ -31,6 +31,7 @@ git pull
 Then configure it and run make on the `install-headers` target
 ```bash
 ./configure &&
+make &&
 make install-headers &&
 make -C examples/loadables install-dev
 ```
