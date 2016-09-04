@@ -21,20 +21,23 @@ compare(const void *p1, const void *p2) {
     const file f1 = *(file *) p1;
     const file f2 = *(file *) p2;
 
-    //printf("%s ", f1.name);
-    //printf("vs %s\n", f2.name);
-
-    if (f1.stat.st_mtim.tv_sec > f2.stat.st_mtim.tv_sec)
+    if (f1.stat.st_mtime > f2.stat.st_mtime)
         return 1;
-    if (f1.stat.st_mtim.tv_sec < f2.stat.st_mtim.tv_sec)
+    if (f1.stat.st_mtime < f2.stat.st_mtime)
         return -1;
 
-    // if seconds are equal, check nano seconds (new in POSIX.1-2008)
+    // if seconds are equal, check nano seconds
+#ifdef __linux__
     if (f1.stat.st_mtim.tv_nsec > f2.stat.st_mtim.tv_nsec)
         return 1;
     if (f1.stat.st_mtim.tv_nsec < f2.stat.st_mtim.tv_nsec)
         return -1;
-
+#elif __APPLE__
+    if (f1.stat.st_mtimensec > f2.stat.st_mtimensec)
+        return 1;
+    if (f1.stat.st_mtimensec < f2.stat.st_mtimensec)
+        return -1;
+#endif
     return 0;
 }
 
